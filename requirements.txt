@@ -1,1 +1,11 @@
--r app/requirements.txt
+flask
+flask-cors
+flask-jwt-extended
+gunicorn
+scikit-learn
+numpy
+pandas
+joblib
+xgboost
+pymongo
+requests
