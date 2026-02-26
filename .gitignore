@@ -1,0 +1,21 @@
+# Ignore non-backend folders
+frontend/
+mobile/
+node_modules/
+airflow-docker/
+dags/
+scripts/
+integrations/
+
+# Environment
+.env
+venv/
+.projVenv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Ignore datasets only
+app/data/
+*.csv
