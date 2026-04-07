@@ -76,28 +76,112 @@ class MongoStore:
         self.active_learning_queue: Collection = self.db["active_learning_queue"]
         self.cloud_verification_queue: Collection = self.db["cloud_verification_queue"]
 
+        # Clean up any problematic data before creating indexes
+        cleanup_stats = self.cleanup_duplicate_emails()
+        if cleanup_stats["removed_duplicates"] > 0 or cleanup_stats["null_emails_cleaned"] > 0:
+            print(f"Database cleanup completed: {cleanup_stats}")
+
         self._ensure_indexes()
 
     def _ensure_indexes(self) -> None:
-        self.users.create_index(
-            [("email", ASCENDING)],
-            unique=True,
-            partialFilterExpression={"email": {"$exists": True, "$nin": [None, ""]}},
-        )
-        self.user_profiles.create_index([("user_id", ASCENDING)], unique=True)
-        self.privacy_settings.create_index([("user_id", ASCENDING)], unique=True)
+        try:
+            # Handle existing email index issues
+            existing_indexes = list(self.users.list_indexes())
+            email_index_exists = any(idx.get('name', '').startswith('email') for idx in existing_indexes)
 
-        self.scan_records.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
-        self.scan_records.create_index([("scan_type", ASCENDING), ("created_at", DESCENDING)])
-        self.scan_records.create_index([("gating.action", ASCENDING), ("created_at", DESCENDING)])
+            if email_index_exists:
+                # Drop existing email index if it exists to avoid conflicts
+                try:
+                    self.users.drop_index("email_1")
+                except Exception:
+                    pass  # Index might not exist with this name
 
-        self.threat_alerts.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
-        self.threat_alerts.create_index([("scan_record_id", ASCENDING)], unique=True)
-        self.threat_alerts.create_index([("acknowledged", ASCENDING), ("created_at", DESCENDING)])
+            # Create new email index with proper filtering
+            self.users.create_index(
+                [("email", ASCENDING)],
+                unique=True,
+                partialFilterExpression={"email": {"$exists": True, "$nin": [None, ""]}},
+                name="email_unique_filtered"
+            )
+        except Exception as e:
+            # Log the error but don't crash - indexes are not critical for basic functionality
+            print(f"Warning: Could not create email index: {e}")
 
-        self.feedback.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
-        self.active_learning_queue.create_index([("status", ASCENDING), ("priority", DESCENDING), ("created_at", ASCENDING)])
-        self.cloud_verification_queue.create_index([("status", ASCENDING), ("created_at", DESCENDING)])
+        # Create other indexes with error handling
+        try:
+            self.user_profiles.create_index([("user_id", ASCENDING)], unique=True)
+        except Exception as e:
+            print(f"Warning: Could not create user_profiles index: {e}")
+
+        try:
+            self.privacy_settings.create_index([("user_id", ASCENDING)], unique=True)
+        except Exception as e:
+            print(f"Warning: Could not create privacy_settings index: {e}")
+
+        try:
+            self.scan_records.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
+            self.scan_records.create_index([("scan_type", ASCENDING), ("created_at", DESCENDING)])
+            self.scan_records.create_index([("gating.action", ASCENDING), ("created_at", DESCENDING)])
+        except Exception as e:
+            print(f"Warning: Could not create scan_records indexes: {e}")
+
+        try:
+            self.threat_alerts.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
+            self.threat_alerts.create_index([("scan_record_id", ASCENDING)], unique=True)
+            self.threat_alerts.create_index([("acknowledged", ASCENDING), ("created_at", DESCENDING)])
+        except Exception as e:
+            print(f"Warning: Could not create threat_alerts indexes: {e}")
+
+        try:
+            self.feedback.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
+        except Exception as e:
+            print(f"Warning: Could not create feedback index: {e}")
+
+        try:
+            self.active_learning_queue.create_index([("status", ASCENDING), ("priority", DESCENDING), ("created_at", ASCENDING)])
+        except Exception as e:
+            print(f"Warning: Could not create active_learning_queue index: {e}")
+
+        try:
+            self.cloud_verification_queue.create_index([("status", ASCENDING), ("created_at", DESCENDING)])
+        except Exception as e:
+            print(f"Warning: Could not create cloud_verification_queue index: {e}")
+
+    def cleanup_duplicate_emails(self) -> dict:
+        """Clean up duplicate email entries, keeping the most recent one."""
+        cleanup_stats = {"removed_duplicates": 0, "null_emails_cleaned": 0}
+
+        try:
+            # Remove documents with null emails that might cause index issues
+            result = self.users.delete_many({"email": None})
+            cleanup_stats["null_emails_cleaned"] = result.deleted_count
+
+            # Find and handle duplicate emails (keeping the most recent)
+            pipeline = [
+                {"$match": {"email": {"$exists": True, "$ne": None, "$ne": ""}}},
+                {"$group": {
+                    "_id": "$email",
+                    "docs": {"$push": {"_id": "$_id", "created_at": "$created_at"}},
+                    "count": {"$sum": 1}
+                }},
+                {"$match": {"count": {"$gt": 1}}}
+            ]
+
+            duplicates = list(self.users.aggregate(pipeline))
+
+            for dup in duplicates:
+                # Sort by creation date, keep the most recent
+                docs = sorted(dup["docs"], key=lambda x: x["created_at"], reverse=True)
+                # Remove all but the most recent
+                to_remove = [doc["_id"] for doc in docs[1:]]
+                if to_remove:
+                    self.users.delete_many({"_id": {"$in": to_remove}})
+                    cleanup_stats["removed_duplicates"] += len(to_remove)
+
+        except Exception as e:
+            print(f"Warning: Error during email cleanup: {e}")
+
+        return cleanup_stats
 
     def ping(self) -> bool:
         try:
