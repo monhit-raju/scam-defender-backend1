@@ -24,7 +24,7 @@ class AppConfig:
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)
 
     MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-    MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "scam_defender")
+    MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "charity")
 
     MODEL_DIR = os.getenv("MODEL_DIR", str(BASE_DIR / "models"))
     FRAUD_ISO_ALERT_THRESHOLD = float(os.getenv("FRAUD_ISO_ALERT_THRESHOLD", "-0.02"))
