@@ -79,7 +79,11 @@ class MongoStore:
         self._ensure_indexes()
 
     def _ensure_indexes(self) -> None:
-        self.users.create_index([("email", ASCENDING)], unique=True)
+        self.users.create_index(
+            [("email", ASCENDING)],
+            unique=True,
+            partialFilterExpression={"email": {"$exists": True, "$nin": [None, ""]}},
+        )
         self.user_profiles.create_index([("user_id", ASCENDING)], unique=True)
         self.privacy_settings.create_index([("user_id", ASCENDING)], unique=True)
 
